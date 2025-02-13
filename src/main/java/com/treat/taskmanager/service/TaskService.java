@@ -6,7 +6,10 @@ import com.treat.taskmanager.repository.TaskRepository;
 import com.treat.taskmanager.utils.TaskMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -15,13 +18,20 @@ public class TaskService {
     private final TaskRepository taskRepository;
 
     public TaskDto addTask(TaskDto taskDto) {
-        Task task = taskRepository.save(TaskMapper.toEntity(taskDto));
+        Task task = TaskMapper.toEntity(taskDto);
+        if (hasCircularDependency(task, new ArrayList<>())) {
+            throw new IllegalStateException("Task contains circular dependencies");
+        }
+        task = taskRepository.save(task);
         return TaskMapper.toDto(task);
     }
 
     public TaskDto updateTask(String id, TaskDto taskDto) {
         return taskRepository.findById(id)
                 .map(existingTask -> {
+                    if (hasCircularDependency(existingTask, taskDto.getDependencies())) {
+                        throw new RuntimeException("Circular dependency detected");
+                    }
                     existingTask.setPriority(taskDto.getPriority());
                     existingTask.setDependencies(taskDto.getDependencies());
                     return TaskMapper.toDto(taskRepository.save(existingTask));
@@ -61,6 +71,37 @@ public class TaskService {
         }
         task.setCompleted(true);
         taskRepository.save(task);
+    }
+
+
+/*** private util methods ***/
+
+private boolean hasCircularDependency(Task task, List<String> dependencies) {
+    List<String> visited = new ArrayList<>();
+    for (String depId : dependencies) {
+        Task dependentTask = taskRepository.findById(depId)
+                .orElseThrow(() -> new RuntimeException("Dependency task not found: " + depId));
+        if (checkCircularDependencyInTask(dependentTask, visited)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+    private boolean checkCircularDependencyInTask(Task task, List<String> visited) {
+        if (visited.contains(task.getId())) {
+            return true;
+        }
+        visited.add(task.getId());
+        for (String depId : task.getDependencies()) {// Recursively check the dependencies of the task
+            Task dependentTask = taskRepository.findById(depId)
+                    .orElseThrow(() -> new RuntimeException("Dependency task not found: " + depId));
+            if (checkCircularDependencyInTask(dependentTask, visited)) {
+                return true; // Circular dependency found in dependencies
+            }
+        }
+        visited.remove(task.getId());
+        return false;
     }
 
 }

@@ -22,4 +22,5 @@ public class Task {
     private LocalDate deadline;
     private List<String> dependencies;
     private boolean completed;
+
 }
